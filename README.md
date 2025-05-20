@@ -13,7 +13,7 @@ https://www.7-zip.org/a/7z2409-extra.7z.
 ```
 Распакуйте его и перенесите 7za.exe в папку tools.
 
-CyberLeninka
+# CyberLeninka
 Затем запустите скрипт DownloaderCyberLeninka.py, который скачивает статьи.
 ```markdown
 python DownloaderCyberLeninka.py -n 6
@@ -57,7 +57,7 @@ python ClassificationOneArticless.py -c "Cores" -i {название файла.
 
 
 
-arXiv
+# arXiv
 Запустите скрипт DownloaderArxiv.py. Он скачивает PDF-статьи с arXiv.
 Первый аргумент колличество статей для каждой темы, второй директория куда будут скачиваться файлы
 ```markdown
