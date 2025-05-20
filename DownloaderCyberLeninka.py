@@ -4,28 +4,40 @@ import requests
 from bs4 import BeautifulSoup
 import re
 from requests.exceptions import ChunkedEncodingError, SSLError, RequestException
+import argparse
+import logging
+import warnings
+from urllib3.exceptions import InsecureRequestWarning
 
-BASE_URL             = "https://cyberleninka.ru"
-HEADERS              = {
+warnings.simplefilter("ignore", InsecureRequestWarning)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
+fh = logging.FileHandler('downloader_errors.log', encoding='utf-8')
+fh.setLevel(logging.WARNING)
+fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+logger.addHandler(fh)
+# ----------------------------------------------------
+
+BASE_URL        = "https://cyberleninka.ru"
+HEADERS         = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/117.0.0.0 Safari/537.36"
 }
-DOWNLOAD_FOLDER      = "Articless"
-START_PAGE           = 65
-TOTAL_DOWNLOAD_LIMIT = 2000
-REQUEST_DELAY        = 5  
+DOWNLOAD_FOLDER = "Articless"
+REQUEST_DELAY   = 5
 
 def create_folder(folder_name):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
-def get_topics(n):
+def get_topics():
     try:
         resp = requests.get(BASE_URL, headers=HEADERS, timeout=10, verify=False)
         resp.raise_for_status()
     except RequestException as e:
-        print(f"Ошибка при загрузке главной страницы: {e}")
+        logger.error(f"Ошибка при загрузке главной страницы: {e}")
         return {}
 
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -35,7 +47,7 @@ def get_topics(n):
         href = link.get("href")
         if href:
             topics[name] = BASE_URL + href
-    print("Извлечено тем:", len(topics))
+    print(f"[INFO] Извлечено тем: {len(topics)}")
     return topics
 
 def get_article_links(topic_url):
@@ -43,16 +55,15 @@ def get_article_links(topic_url):
         resp = requests.get(topic_url, headers=HEADERS, timeout=10, verify=False)
         resp.raise_for_status()
     except RequestException as e:
-        print(f"Ошибка при загрузке темы {topic_url}: {e}")
+        logger.error(f"Ошибка при загрузке темы {topic_url}: {e}")
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    links = [
+    return [
         BASE_URL + a["href"]
         for a in soup.select("a[href^='/article/n/']")
         if a.get("href")
     ]
-    return links
 
 def download_article_text(article_url, folder_name):
     try:
@@ -60,31 +71,30 @@ def download_article_text(article_url, folder_name):
         resp.raise_for_status()
         html = resp.text
     except (ChunkedEncodingError, SSLError) as e:
-        print(f"Ошибка протокола при чтении {article_url}: {e}. Повтор через {REQUEST_DELAY}s...")
+        logger.warning(f"Протокольная ошибка при чтении {article_url}: {e}. Повтор через {REQUEST_DELAY}s...")
         time.sleep(REQUEST_DELAY)
         try:
             resp = requests.get(article_url, headers=HEADERS, timeout=10, verify=False)
             resp.raise_for_status()
             html = resp.text
         except RequestException as e2:
-            print(f"Повтор не удался: {e2}")
+            logger.error(f"Повтор загрузки не удался для {article_url}: {e2}")
             return False
     except RequestException as e:
-        print(f"Ошибка при открытии {article_url}: {e}")
+        logger.error(f"Ошибка при открытии {article_url}: {e}")
         return False
 
     soup = BeautifulSoup(html, "html.parser")
     title_tag = soup.find("h1")
     if not title_tag:
-        print(f"Не найден заголовок: {article_url}")
+        logger.warning(f"Не найден заголовок: {article_url}")
         return False
 
     article_title = title_tag.get_text(strip=True)
     safe_name = re.sub(r'[<>:"/\\|?*]', "", article_title)[:100]
-
     paragraphs = [p.get_text(strip=True) for p in soup.find_all("p")]
     if not paragraphs:
-        print(f"Пустой текст: {article_url}")
+        logger.warning(f"Пустой текст: {article_url}")
         return False
 
     create_folder(folder_name)
@@ -93,10 +103,10 @@ def download_article_text(article_url, folder_name):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(paragraphs))
     except OSError as e:
-        print(f"Ошибка при сохранении {file_path}: {e}")
+        logger.error(f"Ошибка при сохранении {file_path}: {e}")
         return False
 
-    print(f"Скачано: {safe_name}.txt")
+    print(f"[DOWNLOAD] {safe_name}.txt")
     return True
 
 def remove_files_without_extension(folder_path):
@@ -105,60 +115,45 @@ def remove_files_without_extension(folder_path):
             if "." not in fn:
                 fp = os.path.join(root, fn)
                 os.remove(fp)
-                print(f"Удалён безрасширенный файл: {fp}")
+                print(f"[CLEANUP] Удалён безрасширенный файл: {fp}")
 
 def scrape_balanced_cyberleninka(limit_per_topic):
-    total_downloaded = 0
     create_folder(DOWNLOAD_FOLDER)
-    page = START_PAGE
+    topics = get_topics()
+    if not topics:
+        print("[ERROR] Не удалось извлечь темы, выходим.")
+        return
 
-    while total_downloaded < TOTAL_DOWNLOAD_LIMIT:
-        topics = get_topics(page)
-        if not topics:
-            print("Не удалось извлечь темы, выходим.")
-            return
+    state = {}
+    for name, url in topics.items():
+        links = get_article_links(url)
+        if links:
+            state[name] = {"links": links, "downloaded": 0}
 
-        state = {
-            name: {"url": url, "links": get_article_links(url), "downloaded": 0}
-            for name, url in topics.items()
-        }
-        state = {k: v for k, v in state.items() if v["links"]}
+    while any(v["downloaded"] < limit_per_topic and v["links"] for v in state.values()):
+        for name, data in state.items():
+            if data["downloaded"] >= limit_per_topic or not data["links"]:
+                continue
 
-        if not state:
-            print(f"Нет статей на странице {page}, переходим к {page+1}")
-            page += 1
-            continue
+            article_url = data["links"].pop(0)
+            topic_folder = os.path.join(DOWNLOAD_FOLDER, name.replace(" ", "_"))
+            print(f"[INFO] ({data['downloaded']+1}/{limit_per_topic}) тема '{name}': {article_url}")
+            if download_article_text(article_url, topic_folder):
+                data["downloaded"] += 1
 
-        while state and total_downloaded < TOTAL_DOWNLOAD_LIMIT:
-            for name in list(state):
-                data = state[name]
-                if data["downloaded"] >= limit_per_topic:
-                    del state[name]
-                    continue
-                if not data["links"]:
-                    del state[name]
-                    continue
-
-                url = data["links"].pop(0)
-                topic_folder = os.path.join(DOWNLOAD_FOLDER, name.replace(" ", "_"))
-                print(f"Скачиваю ({total_downloaded+1}/{TOTAL_DOWNLOAD_LIMIT}): {url} (тема: {name})")
-                if download_article_text(url, topic_folder):
-                    data["downloaded"] += 1
-                    total_downloaded += 1
-                time.sleep(REQUEST_DELAY)
-
-                if total_downloaded >= TOTAL_DOWNLOAD_LIMIT:
-                    print(f"Достигнут глобальный лимит {TOTAL_DOWNLOAD_LIMIT}.")
-                    remove_files_without_extension(DOWNLOAD_FOLDER)
-                    return
-
-            print("Раунд скачивания завершён, делаем паузу перед следующим раундом.")
             time.sleep(REQUEST_DELAY)
-
-        page += 1
-        print(f"Переходим к странице {page}")
 
     remove_files_without_extension(DOWNLOAD_FOLDER)
 
 if __name__ == "__main__":
-    scrape_balanced_cyberleninka(limit_per_topic=50)
+    parser = argparse.ArgumentParser(
+        description="Скрипт для скачивания статей с CyberLeninka"
+    )
+    parser.add_argument(
+        "-n", "--per-topic",
+        type=int,
+        required=True,
+        help="Точное число статей для скачивания в каждую тему"
+    )
+    args = parser.parse_args()
+    scrape_balanced_cyberleninka(limit_per_topic=args.per_topic)

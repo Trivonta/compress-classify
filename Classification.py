@@ -4,6 +4,7 @@ import shutil
 import logging
 import sys
 import platform
+import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(
@@ -13,13 +14,6 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-def get_archive_size(zip_tool_path, zip_core):
-    try:
-        return os.path.getsize(zip_core)
-    except Exception as e:
-        logger.error(f"Ошибка при получении размера архива {zip_core}: {e}")
-        return None
 
 def compress_text_and_get_diff(zip_tool_path, zip_core, text_file, temp_archive):
     try:
@@ -73,8 +67,7 @@ def classify_text_with_zips(zip_tool_path, zip_cores, text_file, max_workers=Non
     logger.info(f"Результаты для '{os.path.basename(text_file)}':")
     for cat, diff in sorted_diffs:
         logger.info(f"    {cat}: +{diff} байт")
-    best = sorted_diffs[0][0]
-    return best
+    return sorted_diffs[0][0]
 
 def classify_texts(root_folder, cores_folder, zip_tool_path):
     zip_cores = {
@@ -108,22 +101,42 @@ def classify_texts(root_folder, cores_folder, zip_tool_path):
                 per_cat_correct[true_cat] += 1
 
     overall_acc = (correct / total * 100) if total else 0.0
-    logger.info(f"Всего файлов: {total}, Правильно: {correct}, "
-                f"Общая точность: {overall_acc:.2f}%")
+    logger.info(f"Всего файлов: {total}, Правильно: {correct}, Общая точность: {overall_acc:.2f}%")
 
-    acc_per_cat = {
-        cat: (per_cat_correct.get(cat, 0) / cnt * 100)
-        for cat, cnt in per_cat_total.items()
-    }
-    for cat, acc in sorted(acc_per_cat.items(), key=lambda x: x[1], reverse=True):
+    for cat, cnt in per_cat_total.items():
+        acc = per_cat_correct.get(cat, 0) / cnt * 100
         logger.info(f"    {cat}: {acc:.2f}%")
 
 if __name__ == "__main__":
-    ROOT_FOLDER = "Articless"
-    CORES_FOLDER = "Cores"
-    if platform.system() == "Windows":
-        ZIP_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "7zip", "7z.exe")
-    else:
-        ZIP_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "7zip", "7z")
-    classify_texts(ROOT_FOLDER, CORES_FOLDER, ZIP_TOOL)
+    parser = argparse.ArgumentParser(
+        description="Классификация текстов с помощью сжатия в .7z по категориям"
+    )
+    parser.add_argument(
+        "-r", "--root",
+        required=True,
+        help="Путь к корневой папке с подкатегориями текстов"
+    )
+    parser.add_argument(
+        "-c", "--cores",
+        required=True,
+        help="Путь к папке с .7z-архивами ядер"
+    )
+    args = parser.parse_args()
 
+    ROOT_FOLDER = args.root
+    CORES_FOLDER = args.cores
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    if platform.system() == "Windows":
+        ZIP_TOOL = os.path.join(base_dir, "tools", "7zip", "7za.exe")
+    else:
+        ZIP_TOOL = os.path.join(base_dir, "tools", "7zip", "7z")
+
+    if not os.path.isdir(ROOT_FOLDER):
+        sys.exit(f"Root-folder не найден: {ROOT_FOLDER}")
+    if not os.path.isdir(CORES_FOLDER):
+        sys.exit(f"Cores-folder не найден: {CORES_FOLDER}")
+    if not os.path.isfile(ZIP_TOOL):
+        sys.exit(f"Не найден 7z по пути: {ZIP_TOOL}")
+
+    classify_texts(ROOT_FOLDER, CORES_FOLDER, ZIP_TOOL)

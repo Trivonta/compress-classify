@@ -9,7 +9,17 @@ REQUIRED_PACKAGES = [
     "numpy"
 ]
 
-def ensure_up_to_date(package_name: str):
+def install_package(package_name: str):
+    try:
+        __import__(package_name)
+    except ImportError:
+        print(f"[INFO] Пакет '{package_name}' не найден — устанавливаю...")
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install",
+            package_name,
+            "--disable-pip-version-check"
+        ])
+    print(f"[INFO] Обновляю пакет '{package_name}' до последней версии...")
     subprocess.check_call([
         sys.executable, "-m", "pip", "install",
         "--upgrade", package_name,
@@ -18,7 +28,8 @@ def ensure_up_to_date(package_name: str):
 
 def main():
     for pkg in REQUIRED_PACKAGES:
-        ensure_up_to_date(pkg)
+        install_package(pkg)
+    print("[OK] Все зависимости установлены и обновлены.")
 
 if __name__ == "__main__":
     main()

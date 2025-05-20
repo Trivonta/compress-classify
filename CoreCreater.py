@@ -1,55 +1,78 @@
 import os
-import subprocess
 import sys
-import platform
 import shutil
+import subprocess
+import platform
+import argparse
+from random import sample
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_FOLDER = os.path.join(SCRIPT_DIR, "Articless2")
-OUT_FOLDER = os.path.join(SCRIPT_DIR, "Cores")
-os.makedirs(OUT_FOLDER, exist_ok=True)
+def move_and_archive(source_dir, output_dir, files_per_category):
+    if platform.system() == "Windows":
+        zip_tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "7zip", "7za.exe")
+    else:
+        zip_tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "7zip", "7z")
+    os.makedirs(output_dir, exist_ok=True)
 
-if platform.system() == "Windows":
-    ZIP_TOOL = os.path.join(SCRIPT_DIR, "tools", "7zip", "7z.exe")
-else:
-    ZIP_TOOL = os.path.join(SCRIPT_DIR, "tools", "7zip", "7z")
-
-if not os.path.isdir(ROOT_FOLDER):
-    sys.exit(f"Не найдена папка категорий: {ROOT_FOLDER}")
-
-if not os.path.isfile(ZIP_TOOL):
-    sys.exit(f"Не найден 7-Zip по пути: {ZIP_TOOL}")
-
-def create_7zip_for_each_folder(src_root, dst_root, zip_tool_path):
-    for entry in os.listdir(src_root):
-        folder_path = os.path.join(src_root, entry)
-        if not os.path.isdir(folder_path):
+    for category in os.listdir(source_dir):
+        cat_path = os.path.join(source_dir, category)
+        if not os.path.isdir(cat_path):
             continue
 
-        zip_file = os.path.join(dst_root, f"{entry}.7z")
-        print(f"Архивируем «{folder_path}» - «{zip_file}»…")
+        files = [f for f in os.listdir(cat_path) if os.path.isfile(os.path.join(cat_path, f))]
+        if not files:
+            print(f"Skipping empty category: {category}")
+            continue
 
+        num_to_move = min(files_per_category, len(files))
+        to_move = sample(files, num_to_move)
+
+        staging_folder = os.path.join(output_dir, category)
+        os.makedirs(staging_folder, exist_ok=True)
+
+        for fname in to_move:
+            src = os.path.join(cat_path, fname)
+            dst = os.path.join(staging_folder, fname)
+            shutil.move(src, dst)
+        print(f"Moved {num_to_move} files from '{category}' to staging.")
+
+        archive_path = os.path.join(output_dir, f"{category}.7z")
+        print(f"Archiving '{staging_folder}' -> '{archive_path}'...")
         try:
             subprocess.run(
-                [zip_tool_path, "a", "-t7z", zip_file, os.path.join(folder_path, "*")],
+                [zip_tool, "a", "-t7z", archive_path, os.path.join(staging_folder, "*")],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            print(f"  Архив создан: {zip_file}")
+            print(f"Archive created: {archive_path}")
         except subprocess.CalledProcessError as e:
             err = e.stderr.decode(errors="ignore").strip()
-            print(f"  Ошибка при архивировании «{entry}»: {err}")
-            continue
-        except Exception as ex:
-            print(f"  Непредвиденная ошибка для «{entry}»: {ex}")
+            print(f"Error archiving '{category}': {err}")
             continue
 
         try:
-            shutil.rmtree(folder_path)
-            print(f"  Удалена исходная папка: {folder_path}")
+            shutil.rmtree(staging_folder)
+            print(f"Removed staging folder: {staging_folder}")
         except Exception as ex:
-            print(f"  Не удалось удалить папку «{folder_path}»: {ex}")
+            print(f"Could not remove staging folder '{staging_folder}': {ex}")
 
-if __name__ == "__main__":
-    print(f"Исходная папка:  {ROOT_FOLDER}")
-    print(f"Папка для архивов: {OUT_FOLDER}")
-    create_7zip_for_each_folder(ROOT_FOLDER, OUT_FOLDER, ZIP_TOOL)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="..."
+    )
+    parser.add_argument(
+        '-n', '--number', type=int, required=True,
+        help="..."
+    )
+    parser.add_argument(
+        '-s', '--source', type=str, required=True,
+        help="..."
+    )
+    parser.add_argument(
+        '-o', '--output', type=str, required=True,
+        help="..."
+    )
+    args = parser.parse_args()
+
+    if not os.path.isdir(args.source):
+        sys.exit(f"...")
+
+    move_and_archive(args.source, args.output, args.number)
